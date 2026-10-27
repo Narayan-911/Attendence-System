@@ -1,21 +1,41 @@
 -- ====================================================================
--- College Attendance Management Platform - Production Database Schema
--- Compatible with AWS RDS MySQL 8.x / 5.7 & Local MySQL
+-- Professional Attendance Management System - Database Migration
+-- Target: AWS RDS MySQL & Local MySQL
+-- Safe, Non-Destructive, Preserves All Existing Records
 -- ====================================================================
 
+-- 1. Ensure database exists and is selected
 CREATE DATABASE IF NOT EXISTS attendance_db;
 USE attendance_db;
 
--- 1. Teachers / Users table with Role-Based Access Control
+-- 2. Teachers table: Add role column if not present
 CREATE TABLE IF NOT EXISTS teachers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
-    email VARCHAR(100) NOT NULL,
-    role ENUM('admin', 'teacher', 'student') NOT NULL DEFAULT 'teacher'
+    email VARCHAR(100) NOT NULL
 );
 
--- 2. Students table
+-- Safely add role column if it does not exist
+SET @dbname = DATABASE();
+SET @tablename = 'teachers';
+SET @columnname = 'role';
+SET @preparedStatement = (SELECT IF(
+  (
+    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE
+      TABLE_SCHEMA = @dbname
+      AND TABLE_NAME = @tablename
+      AND COLUMN_NAME = @columnname
+  ) > 0,
+  'SELECT 1',
+  'ALTER TABLE teachers ADD COLUMN role ENUM(\'admin\', \'teacher\', \'student\') NOT NULL DEFAULT \'teacher\' AFTER email'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;
+
+-- 3. Students table
 CREATE TABLE IF NOT EXISTS students (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -23,7 +43,7 @@ CREATE TABLE IF NOT EXISTS students (
     class VARCHAR(50) NOT NULL
 );
 
--- 3. Subjects table (Teacher-owned courses)
+-- 4. Subjects table (Full Teacher Subject Authority Model)
 CREATE TABLE IF NOT EXISTS subjects (
     id INT AUTO_INCREMENT PRIMARY KEY,
     teacher_id INT NOT NULL,
@@ -39,7 +59,7 @@ CREATE TABLE IF NOT EXISTS subjects (
     UNIQUE KEY unique_teacher_subject_code (teacher_id, subject_code)
 );
 
--- 4. Attendance table
+-- 5. Attendance table
 CREATE TABLE IF NOT EXISTS attendance (
     id INT AUTO_INCREMENT PRIMARY KEY,
     student_id INT NOT NULL,
@@ -48,6 +68,40 @@ CREATE TABLE IF NOT EXISTS attendance (
     status ENUM('Present', 'Absent') NOT NULL,
     teacher_id INT NOT NULL,
     FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
-    FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
-    UNIQUE KEY unique_student_subject_date (student_id, date, subject)
+    FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE
 );
+
+-- Safely add subject column if attendance was created without it
+SET @columnname = 'subject';
+SET @preparedStatement = (SELECT IF(
+  (
+    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE
+      TABLE_SCHEMA = @dbname
+      AND TABLE_NAME = 'attendance'
+      AND COLUMN_NAME = @columnname
+  ) > 0,
+  'SELECT 1',
+  'ALTER TABLE attendance ADD COLUMN subject VARCHAR(100) NOT NULL DEFAULT \'General\' AFTER date'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;
+
+-- Ensure unique constraint for attendance per student, date, and subject
+-- First check if index exists
+SET @indexname = 'unique_student_subject_date';
+SET @preparedStatement = (SELECT IF(
+  (
+    SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE
+      TABLE_SCHEMA = @dbname
+      AND TABLE_NAME = 'attendance'
+      AND INDEX_NAME = @indexname
+  ) > 0,
+  'SELECT 1',
+  'ALTER TABLE attendance ADD UNIQUE KEY unique_student_subject_date (student_id, date, subject)'
+));
+PREPARE addIndexIfNotExists FROM @preparedStatement;
+EXECUTE addIndexIfNotExists;
+DEALLOCATE PREPARE addIndexIfNotExists;
