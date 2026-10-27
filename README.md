@@ -22,7 +22,7 @@ GitHub Repository: [https://github.com/Narayan-911/Attendance_System_Package](ht
 
 ```
 Attendance_System_Package/
-├── database_migration.sql        # Non-destructive SQL migration script for AWS RDS / Local
+|
 ├── attendance.sql                # Complete initial production database schema
 ├── index.html                    # Modern landing page & portal entry
 ├── README.md                     # Comprehensive setup, deployment & architecture docs
